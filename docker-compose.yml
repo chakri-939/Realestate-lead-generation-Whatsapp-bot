@@ -1,0 +1,96 @@
+networks:
+  whatsapp-net:
+    driver: bridge
+
+volumes:
+  db_storage:
+    name: biligualwhatsapprealestateleadgenerationsystem_db_storage
+  n8n_storage:
+    name: biligualwhatsapprealestateleadgenerationsystem_n8n_storage
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: whatsapp_postgres
+    restart: always
+    networks:
+      - whatsapp-net
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    volumes:
+      - db_storage:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    container_name: whatsapp_n8n
+    restart: always
+    networks:
+      - whatsapp-net
+    ports:
+      - "${N8N_PORT}:5678"
+    environment:
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=${POSTGRES_DB}
+      - DB_POSTGRESDB_USER=${POSTGRES_USER}
+      - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+      - WEBHOOK_URL=${WEBHOOK_URL}
+      - GOOGLE_SHEETS_ID=${GOOGLE_SHEETS_ID}
+      - META_PHONE_NUMBER_ID=${META_PHONE_NUMBER_ID}
+      - N8N_ENVS_MODE=allow
+      - N8N_ENVS_LIST=GOOGLE_SHEETS_ID,META_PHONE_NUMBER_ID,META_APP_SECRET
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+      - NODE_FUNCTION_ALLOW_BUILTIN=crypto
+    volumes:
+      - n8n_storage:/home/node/.n8n
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  pgadmin:
+    image: dpage/pgadmin4:8.6
+    container_name: whatsapp_pgadmin
+    restart: always
+    networks:
+      - whatsapp-net
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD}
+    ports:
+      - "${PGADMIN_PORT}:80"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  rag-api:
+    build:
+      context: ./rag_api
+      dockerfile: Dockerfile
+    container_name: whatsapp_rag_api
+    restart: always
+    networks:
+      - whatsapp-net
+    # Note: Host port mapping omitted to isolate RAG API inside internal whatsapp-net Docker bridge.
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - DB_PATH=/app/data/transactions.duckdb
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+
+
